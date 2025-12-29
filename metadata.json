@@ -1,0 +1,5 @@
+{
+  "name": "LinkDash - Gestor de Favoritos",
+  "description": "Um dashboard moderno e elegante para organizar seus links favoritos por categorias com persistência local.",
+  "requestFramePermissions": []
+}
