@@ -1,5 +1,5 @@
 
-import { Category } from '../types';
+import { Category, Link, SubCategory } from '../types';
 import { INITIAL_CATEGORIES } from '../constants';
 
 const STORAGE_KEY = 'linkdash_global_state';
@@ -13,15 +13,12 @@ export interface AppState {
 }
 
 export class StorageService {
-  /**
-   * Carrega o estado global com lógica de migração e tratamento de erros.
-   */
   static loadState(): AppState {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       
       if (!saved) {
-        // Tentar recuperar de versões antigas se existirem
+        // Fallback para versões muito antigas
         const oldCategories = localStorage.getItem('linkdash_categories_v3') || localStorage.getItem('linkdash_categories_v2');
         const oldNotes = localStorage.getItem('linkdash_notes_v2');
         
@@ -33,28 +30,16 @@ export class StorageService {
             notes: oldNotes || ''
           };
         }
-        
         return this.getInitialState();
       }
 
-      const parsed: AppState = JSON.parse(saved);
-
-      // Lógica de Migração de Versão (futura)
-      if (parsed.version !== CURRENT_VERSION) {
-        console.warn(`Versão detectada (${parsed.version}) difere da atual (${CURRENT_VERSION}). Aplicando migrações...`);
-        // Aqui seriam aplicadas funções transformadoras caso o esquema mudasse drasticamente
-      }
-
-      return parsed;
+      return JSON.parse(saved);
     } catch (error) {
-      console.error('Falha crítica ao carregar estado do localStorage:', error);
+      console.error('Falha ao carregar estado:', error);
       return this.getInitialState();
     }
   }
 
-  /**
-   * Salva o estado global de forma atômica.
-   */
   static saveState(categories: Category[], notes: string) {
     try {
       const state: AppState = {
@@ -66,16 +51,9 @@ export class StorageService {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (error) {
       console.error('Erro ao salvar estado:', error);
-      // Fallback: tentar salvar apenas categorias se o objeto for muito grande
-      if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-        alert('Espaço de armazenamento esgotado! Tente remover imagens de fundo pesadas.');
-      }
     }
   }
 
-  /**
-   * Gera um arquivo JSON para backup.
-   */
   static exportData() {
     const state = this.loadState();
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -88,8 +66,72 @@ export class StorageService {
   }
 
   /**
-   * Valida e restaura dados de um arquivo JSON.
+   * Normaliza dados externos para o formato compatível com o App.
+   * Suporta arquivos com campos em português (nome, cor, subcategorias)
    */
+  static normalizeData(data: any): Category[] {
+    // Se o dado for um objeto de exportação completo ou apenas um array de categorias
+    const rawCategories = data.categories || (Array.isArray(data) ? data : null);
+    
+    if (!rawCategories || !Array.isArray(rawCategories)) {
+      // Se for apenas uma categoria única solta no arquivo
+      if (data.nome || data.name) return [this.normalizeCategory(data)];
+      return [];
+    }
+
+    return rawCategories.map(cat => this.normalizeCategory(cat));
+  }
+
+  private static normalizeCategory(cat: any): Category {
+    const categoryId = String(cat.id || Math.random().toString(36).substr(2, 9));
+    const categoryColor = cat.color || cat.cor || '#44dec5';
+    
+    const normalizedCat: Category = {
+      id: categoryId,
+      name: cat.name || cat.nome || 'Categoria sem nome',
+      color: categoryColor,
+      icon: cat.icon || 'LayoutGrid',
+      imageUrl: cat.imageUrl || cat.imagem || null,
+      subCategories: []
+    };
+
+    // 1. Processar subcategorias existentes
+    const rawSubs = cat.subCategories || cat.subcategorias || [];
+    if (Array.isArray(rawSubs)) {
+      normalizedCat.subCategories = rawSubs.map((sub: any) => ({
+        id: String(sub.id || Math.random().toString(36).substr(2, 9)),
+        name: sub.name || sub.nome || 'Seção',
+        color: sub.color || sub.cor || categoryColor,
+        icon: sub.icon || 'Sparkles',
+        links: this.normalizeLinks(sub.links)
+      }));
+    }
+
+    // 2. Processar links "órfãos" (links que estão direto na categoria, comum nos seus arquivos)
+    const orphanLinks = cat.links;
+    if (Array.isArray(orphanLinks) && orphanLinks.length > 0) {
+      normalizedCat.subCategories.push({
+        id: `section-gen-${categoryId}`,
+        name: 'Geral',
+        color: categoryColor,
+        icon: 'List',
+        links: this.normalizeLinks(orphanLinks)
+      });
+    }
+
+    return normalizedCat;
+  }
+
+  private static normalizeLinks(links: any): Link[] {
+    if (!Array.isArray(links)) return [];
+    return links.map((l: any) => ({
+      id: String(l.id || Math.random().toString(36).substr(2, 9)),
+      name: l.name || l.nome || 'Link',
+      url: l.url || '#',
+      icon: l.icon || 'Globe'
+    }));
+  }
+
   static async importData(file: File): Promise<AppState> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -97,20 +139,18 @@ export class StorageService {
         try {
           const content = e.target?.result as string;
           const parsed = JSON.parse(content);
+          const normalized = this.normalizeData(parsed);
           
-          // Validação básica de estrutura
-          if (!parsed.categories || !Array.isArray(parsed.categories)) {
-            throw new Error('Formato de arquivo inválido: Lista de categorias não encontrada.');
-          }
+          if (normalized.length === 0) throw new Error('Estrutura de arquivo inválida.');
 
-          // Garantir que a versão seja marcada como a atual após importação bem sucedida
-          const newState = {
-            ...parsed,
+          const newState: AppState = {
             version: CURRENT_VERSION,
-            lastModified: Date.now()
+            lastModified: Date.now(),
+            categories: normalized,
+            notes: parsed.notes || ''
           };
-
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(newState));
+          
+          this.saveState(newState.categories, newState.notes);
           resolve(newState);
         } catch (error) {
           reject(error);

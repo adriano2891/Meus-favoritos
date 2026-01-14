@@ -40,10 +40,10 @@ const CategoryCard: React.FC<CategoryCardProps> = ({ category, onClick, onEdit, 
         style={{ backgroundColor: category.color }}
       />
 
-      {/* Background Image with advanced masking */}
+      {/* Background Image with advanced masking - Opacity increased to decrease transparency */}
       {category.imageUrl && (
         <div 
-          className="absolute inset-0 opacity-10 group-hover:opacity-25 transition-all duration-700 scale-105 group-hover:scale-100 pointer-events-none"
+          className="absolute inset-0 opacity-40 group-hover:opacity-65 transition-all duration-700 scale-105 group-hover:scale-100 pointer-events-none"
           style={{ 
             backgroundImage: `url(${category.imageUrl})`,
             backgroundSize: 'cover',
